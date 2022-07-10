@@ -84,10 +84,23 @@ class Operation:
                 new_users.append(user)
         self.users = new_users
 
-    def backward(self):
+    def backward(self, accumulate_grad: bool = False) -> None:
+        """ Calculate the gradient of this node to all tensors that used to compute this node.
+
+        Notes:
+             1. Only Tensors that require_grad==True will be calculated.
+
+        Args:
+            accumulate_grad: If True, accumulate the newly computed grad to the previous grad.
+                If False, replace the previous grad with the newly computed grad. Default is False.
+
+        Returns:
+            None
+
+        """
         # on_grad_path is False by default, and will be cleared during backward
         self.__mark_all_grad_node()
-        return self.__backward(0)
+        return self.__backward(0, accumulate_grad)
 
     def __mark_all_grad_node(self):
         any_input_on_path = False
@@ -100,7 +113,7 @@ class Operation:
         self.on_grad_path = any_input_on_path
         return any_input_on_path
 
-    def __backward(self, depth: int):
+    def __backward(self, depth: int, accumulate_grad: bool) -> None:
         if not self.on_grad_path:
             if depth == 0:
                 _loger.warning(f"Backward ignored, for all tensors needed to calculate {self} do not require grad.")
@@ -121,14 +134,18 @@ class Operation:
             o_grad = np.ones(shape=(1, self.value.size))
 
         if isinstance(self, tensor.Tensor):
-            self.grad = o_grad.reshape(self.value.shape)
+            if self.grad is None or not accumulate_grad:
+                self.grad = o_grad.reshape(self.value.shape)
+            else:
+                self.grad += o_grad.reshape(self.value.shape)
+
         else:
             jac = self._jacobian()
             assert jac.keys() == self.inputs.keys()
             for k, i in self.inputs.items():
                 self.prod_jacobian[k] = np.matmul(o_grad, jac[k])
             for _, i in self.inputs.items():
-                i.__backward(depth + 1)
+                i.__backward(depth + 1, accumulate_grad)
         all_input_graded = True
         for _, i in self.inputs.items():
             if i.on_grad_path and len(i.prod_jacobian) == 0:
