@@ -1,13 +1,13 @@
 import logging
 import weakref
 from numbers import Number
-from typing import List, Union, Dict, ClassVar, TypeVar
+from typing import List, Union, Dict, ClassVar, TypeVar, Optional
 
 import numpy as np
 
 from chell.core import tensor
 from chell.core import uuid
-from chell.core.ops import binary
+from chell.core.ops import common
 
 OpArgT = Union[Number, np.ndarray, "Operation"]
 OperationClass = TypeVar("OperationClass", bound="Operation")
@@ -100,11 +100,16 @@ class Operation:
         self.on_grad_path = any_input_on_path
         return any_input_on_path
 
-    def __backward(self, depth):
+    def __backward(self, depth: int):
         if not self.on_grad_path:
             if depth == 0:
-                _loger.warning(f"Backward ignored, for all tensors need to calculate {self} do not require grad.")
+                _loger.warning(f"Backward ignored, for all tensors needed to calculate {self} do not require grad.")
             return
+        if depth == 0 and self.value.size != 1:
+            _loger.warning(
+                "Calling backward on a node that has non-scalar output,"
+                "the backward will update grad like doing `node.sum().backward()`")
+
         if depth != 0:
             o_grad = np.zeros(shape=(1, self.value.size))
             for user in self.users:
@@ -145,50 +150,47 @@ class Operation:
     def __repr__(self):
         return f"{self.node_name} = {self.__class__.__name__}({' , '.join([f'{k}={i.node_name}' for k, i in self.inputs.items()])})"
 
+    def eq(self, other: OpArgT) -> "Operation":
+        return _binary_template(self, other, common.Eq)
+
+    def all_close(self, other: OpArgT) -> "Operation":
+        return _binary_template(self, other, common.AllClose)
+
+    def sum(self, axis: Optional[int] = None) -> "Operation":
+        return common.ReduceSum(self, axis)
+
     def __eq__(self, other: OpArgT) -> bool:
         if isinstance(other, Operation):
             return np.all(self.value == other.value)
         else:
             return np.all(self.value == other)
 
-    def op_eq(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Eq)
-
-    def all_close(self, other: OpArgT) -> bool:
-        if isinstance(other, Operation):
-            return np.allclose(self.value, other.value)
-        else:
-            return np.allclose(self.value, other)
-
-    def all_close_op(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.AllClose)
-
     def __mul__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Mul)
+        return _binary_template(self, other, common.Mul)
 
     def __add__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Add)
+        return _binary_template(self, other, common.Add)
 
     def __sub__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Sub)
+        return _binary_template(self, other, common.Sub)
 
     def __truediv__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Div)
+        return _binary_template(self, other, common.Div)
 
     def __matmul__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Matmul)
+        return _binary_template(self, other, common.Matmul)
 
     def __pow__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Pow)
+        return _binary_template(self, other, common.Pow)
 
     def __mod__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.Mod)
+        return _binary_template(self, other, common.Mod)
 
     def __divmod__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.DivMod)
+        return _binary_template(self, other, common.DivMod)
 
     def __lt__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.LT)
+        return _binary_template(self, other, common.LT)
 
     def __le__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, binary.LE)
+        return _binary_template(self, other, common.LE)

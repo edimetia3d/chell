@@ -10,7 +10,7 @@ model = a @ x + b
 expect = tensor.Tensor("expect", np.ones((2, 1)))
 diff = (model - expect)
 diff_square = diff * diff
-loss = tensor.Tensor("tmp", np.ones((1, 2))) @ diff_square  # sum
+loss = diff_square.sum()
 
 true_a = np.random.rand(2, 3)
 true_b = np.random.rand(2, 1)

@@ -1,1 +1,1 @@
-from .binary import *
+from .common import *

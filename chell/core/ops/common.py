@@ -1,4 +1,6 @@
-from typing import Callable, Any
+# all operation in this file will be used in the op.Operation class
+
+from typing import Callable, Any, Union, Optional
 
 import numpy as np
 
@@ -24,7 +26,34 @@ class _BinaryOp(op.Operation):
     def _compute(self):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
-        self.value = self._binary_np_func(ix.value, iy.value)
+        self.value = self.__class__._binary_np_func(ix.value, iy.value)
+
+
+class _Reduce(op.Operation):
+    _reduce_np_func: Callable[[Any, Optional[int]], np.ndarray] = None
+    _OP_NAME: str = None
+
+    def __init__(self, x: op.OpArgT, axis: Union[int, None]):
+        op_name = self._OP_NAME
+        if op_name is None:
+            op_name = self.__class__.__name__.lower()
+        self.axis = axis
+        super().__init__(op_name, {"x": x})
+
+    def _compute(self):
+        ix = self.inputs["x"]
+        v = self.__class__._reduce_np_func(ix.value, self.axis)
+        if np.isscalar(v):
+            v = np.array([v])
+        self.value = v
+
+
+class ReduceSum(_Reduce):
+    _reduce_np_func = np.sum
+
+    def _upate_grad_to_jacobian(self):
+        ix = self.inputs["x"]
+        self.grad["x"] = np.ones(shape=(1, ix.value.size))
 
 
 def _can_broadcast(v0: np.ndarray, v1: np.ndarray) -> bool:
