@@ -20,7 +20,7 @@ class Tensor(op.Operation):
                 self.value = np.array(value)
         self.requires_grad: bool = requires_grad
 
-    def update(self, value: Union[Number, np.ndarray]):
+    def set_value(self, value: Union[Number, np.ndarray]):
         self.value = np.array(value)
         self._invalid_user_value()
 
