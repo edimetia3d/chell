@@ -1,7 +1,7 @@
 import logging
 import weakref
 from numbers import Number
-from typing import List, Union, Dict, ClassVar, TypeVar, Optional
+from typing import List, Union, Dict, ClassVar, TypeVar, Optional, Set
 
 import numpy as np
 
@@ -162,11 +162,17 @@ class Operation:
         raise NotImplementedError
 
     def dump(self):
-        for _, i_op in self.inputs.items():
-            i_op.dump()
-        print(self)
+        printed = set()
+        self.__dump(printed)
 
-    def __repr__(self):
+    def __dump(self, printed_nodes: Set["Operation"]):
+        for _, i_op in self.inputs.items():
+            i_op.__dump(printed_nodes)
+        if id(self) not in printed_nodes:
+            print(self)
+            printed_nodes.add(id(self))
+
+    def __str__(self):
         return f"{self.node_name} = {self.__class__.__name__}({' , '.join([f'{k}={i.node_name}' for k, i in self.inputs.items()])})"
 
     def eq(self, other: OpArgT) -> "Operation":
