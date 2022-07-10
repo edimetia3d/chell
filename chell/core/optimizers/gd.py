@@ -19,9 +19,10 @@ class GD(optimizer.Optimizer):
                 self.velocities[p.node_name]: Dict[str, np.ndarray] = np.zeros(shape=p.value.shape)
 
     def step(self) -> None:
-        for _, p in self.params.items():
+        for node_name, p in self.params.items():
+            mean_grad = p.grad.mean(axis=0, keepdims=True)[0]
             if self.momentum > 0:
-                self.velocities[p.node_name] = self.momentum * self.velocities[p.node_name] + self.lr * p.grad
-                p.value -= self.velocities[p.node_name]
+                self.velocities[node_name] = self.momentum * self.velocities[node_name] + self.lr * mean_grad
+                p.value -= self.velocities[node_name]
             else:
-                p.value -= self.lr * p.grad
+                p.value -= self.lr * mean_grad

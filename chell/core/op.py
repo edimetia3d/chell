@@ -124,20 +124,26 @@ class Operation:
                 "Chell will update grad like doing backward on `node.sum()`")
 
         if depth != 0:
-            o_grad = np.zeros(shape=(1, self.value.size))
+            o_grad = None
             for user in self.users:
                 if user() is not None and user().on_grad_path:
                     for k, user_i in user().inputs.items():
                         if user_i is self:
-                            o_grad += user().prod_jacobian[k]
+                            if o_grad is None:
+                                o_grad = user().prod_jacobian[k].copy()
+                            else:
+                                o_grad += user().prod_jacobian[k]
         else:
             o_grad = np.ones(shape=(1, self.value.size))
 
         if isinstance(self, tensor.Tensor):
+            batch_size = int(o_grad.size / self.value.size)
+            final_shape = [batch_size, *self.value.shape]
+            final_out = o_grad.reshape(final_shape)
             if self.grad is None or not accumulate_grad:
-                self.grad = o_grad.reshape(self.value.shape)
+                self.grad = final_out
             else:
-                self.grad += o_grad.reshape(self.value.shape)
+                self.grad += final_out
 
         else:
             jac = self._jacobian()

@@ -58,12 +58,6 @@ class ReduceSum(_Reduce):
         return jac
 
 
-def _can_broadcast(v0: np.ndarray, v1: np.ndarray) -> bool:
-    s0 = np.asarray(v0.shape)
-    s1 = np.asarray(v1.shape)
-    return ((s0 == 1) | (s1 == 1) | (s1 == s0)).all()
-
-
 class Add(_BinaryOp):
     _binary_np_func: Callable[[Any, Any], np.ndarray] = np.add
 
@@ -71,7 +65,6 @@ class Add(_BinaryOp):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
         jac = {}
-        assert _can_broadcast(ix.value, iy.value)
         jac["x"] = np.eye(self.value.size)
         jac["y"] = np.eye(self.value.size)
         return jac
@@ -84,7 +77,6 @@ class Sub(_BinaryOp):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
         jac = {}
-        assert _can_broadcast(ix.value, iy.value)
         jac["x"] = np.eye(self.value.size)
         jac["y"] = np.eye(self.value.size) * -1
         return jac
@@ -97,7 +89,6 @@ class Mul(_BinaryOp):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
         jac = {}
-        assert _can_broadcast(ix.value, iy.value)
         jac["x"] = np.diag(np.broadcast_to(iy.value, self.value.shape).ravel())
         jac["y"] = np.diag(np.broadcast_to(ix.value, self.value.shape).ravel())
         return jac
