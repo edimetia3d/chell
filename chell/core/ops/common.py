@@ -26,7 +26,7 @@ class _BinaryOp(op.Operation):
     def _compute(self):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
-        self.value = self.__class__._binary_np_func(ix.value, iy.value)
+        return self.__class__._binary_np_func(ix.value, iy.value)
 
 
 class _Reduce(op.Operation):
@@ -45,15 +45,17 @@ class _Reduce(op.Operation):
         v = self.__class__._reduce_np_func(ix.value, self.axis)
         if np.isscalar(v):
             v = np.array([v])
-        self.value = v
+        return v
 
 
 class ReduceSum(_Reduce):
     _reduce_np_func = np.sum
 
-    def _upate_grad_to_jacobian(self):
+    def _jacobian(self):
         ix = self.inputs["x"]
-        self.grad["x"] = np.ones(shape=(1, ix.value.size))
+        jac = {}
+        jac["x"] = np.ones(shape=(1, ix.value.size))
+        return jac
 
 
 def _can_broadcast(v0: np.ndarray, v1: np.ndarray) -> bool:
@@ -65,34 +67,40 @@ def _can_broadcast(v0: np.ndarray, v1: np.ndarray) -> bool:
 class Add(_BinaryOp):
     _binary_np_func: Callable[[Any, Any], np.ndarray] = np.add
 
-    def _upate_grad_to_jacobian(self):
+    def _jacobian(self):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
+        jac = {}
         assert _can_broadcast(ix.value, iy.value)
-        self.grad["x"] = np.eye(self.value.size)
-        self.grad["y"] = np.eye(self.value.size)
+        jac["x"] = np.eye(self.value.size)
+        jac["y"] = np.eye(self.value.size)
+        return jac
 
 
 class Sub(_BinaryOp):
     _binary_np_func: Callable[[Any, Any], np.ndarray] = np.subtract
 
-    def _upate_grad_to_jacobian(self):
+    def _jacobian(self):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
+        jac = {}
         assert _can_broadcast(ix.value, iy.value)
-        self.grad["x"] = np.eye(self.value.size)
-        self.grad["y"] = np.eye(self.value.size) * -1
+        jac["x"] = np.eye(self.value.size)
+        jac["y"] = np.eye(self.value.size) * -1
+        return jac
 
 
 class Mul(_BinaryOp):
     _binary_np_func: Callable[[Any, Any], np.ndarray] = np.multiply
 
-    def _upate_grad_to_jacobian(self):
+    def _jacobian(self):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
+        jac = {}
         assert _can_broadcast(ix.value, iy.value)
-        self.grad["x"] = np.diag(np.broadcast_to(iy.value, self.value.shape).ravel())
-        self.grad["y"] = np.diag(np.broadcast_to(ix.value, self.value.shape).ravel())
+        jac["x"] = np.diag(np.broadcast_to(iy.value, self.value.shape).ravel())
+        jac["y"] = np.diag(np.broadcast_to(ix.value, self.value.shape).ravel())
+        return jac
 
 
 class Div(_BinaryOp):
@@ -158,7 +166,7 @@ class Abs(_BinaryOp):
 class Matmul(_BinaryOp):
     _binary_np_func: Callable[[Any, Any], np.ndarray] = np.matmul
 
-    def _upate_grad_to_jacobian(self):
+    def _jacobian(self):
         ix = self.inputs["x"]
         iy = self.inputs["y"]
         M = ix.value.shape[0]
@@ -171,5 +179,5 @@ class Matmul(_BinaryOp):
             for j in range(N):
                 grad_x[i * N + j, i * K:(i + 1) * K] = iy.value[:, j]
                 grad_y[i * N + j, j + N * np.arange(K)] = ix.value[i, :]
-        self.grad["x"] = grad_x
-        self.grad["y"] = grad_y
+        jac = {"x": grad_x, "y": grad_y}
+        return jac

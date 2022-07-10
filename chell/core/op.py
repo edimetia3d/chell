@@ -43,10 +43,10 @@ class Operation:
         # self.value is the output of the node after forward, ONLY one is allowed
         self.value: Union[
             np.ndarray, None] = None
-        # abs grad from root to current node, a Jacboian Mat
+        # producted jacobian from root to current node
         # leaf node (i.e. Tensor) will have grad of np.ndarray
-        # non-leaf node (i.e. Operation) will have grad of Dict[str, np.ndarray]
-        self.grad: Union[Dict[str, np.ndarray], np.ndarray] = {}
+        # non-leaf node (i.e. non-Tensor operation) will have prod_jacobian of Dict[str, np.ndarray]
+        self.prod_jacobian: Union[Dict[str, np.ndarray], np.ndarray] = {}
         self.on_grad_path = False  # whether this node is on the grad path
         self.users: List[weakref.ref[Operation]] = []  # users of the node's output
         is_all_variable_known = True
@@ -55,7 +55,7 @@ class Operation:
                 is_all_variable_known = False
             inode.users.append(weakref.ref(self))
         if is_all_variable_known:
-            self._compute()
+            self.value = self._compute()
 
     def __cleanup_op_arg_dict(self, _inputs) -> Dict[str, "Operation"]:
         inputs = _inputs.copy()
@@ -72,15 +72,15 @@ class Operation:
                 i.forward()
         # compute this node
         if self.value is None:
-            self._compute()
-            self._invalid_user_value()
+            self.value = self._compute()
+            self._invalidate_user_value()
 
-    def _invalid_user_value(self):
+    def _invalidate_user_value(self):
         new_users = []
         for user in self.users:
             if user() is not None:
                 user().value = None  # update this node's value will invalid all user's value
-                user()._invalid_user_value()
+                user()._invalidate_user_value()
                 new_users.append(user)
         self.users = new_users
 
@@ -108,7 +108,7 @@ class Operation:
         if depth == 0 and self.value.size != 1:
             _loger.warning(
                 "Calling backward on a node that has non-scalar output,"
-                "the backward will update grad like doing `node.sum().backward()`")
+                "Chell will update grad like doing backward on `node.sum()`")
 
         if depth != 0:
             o_grad = np.zeros(shape=(1, self.value.size))
@@ -116,30 +116,32 @@ class Operation:
                 if user() is not None and user().on_grad_path:
                     for k, user_i in user().inputs.items():
                         if user_i is self:
-                            o_grad += user().grad[k]
+                            o_grad += user().prod_jacobian[k]
         else:
             o_grad = np.ones(shape=(1, self.value.size))
-        self._upate_grad_to_jacobian()
+
         if isinstance(self, tensor.Tensor):
             self.grad = o_grad.reshape(self.value.shape)
         else:
+            jac = self._jacobian()
+            assert jac.keys() == self.inputs.keys()
             for k, i in self.inputs.items():
-                self.grad[k] = np.matmul(o_grad, self.grad[k])
+                self.prod_jacobian[k] = np.matmul(o_grad, jac[k])
             for _, i in self.inputs.items():
                 i.__backward(depth + 1)
         all_input_graded = True
         for _, i in self.inputs.items():
-            if i.on_grad_path and len(i.grad) == 0:
+            if i.on_grad_path and len(i.prod_jacobian) == 0:
                 all_input_graded = False
         if all_input_graded:
             self.on_grad_path = False
             if not isinstance(self, tensor.Tensor):
-                self.grad = {}
+                self.prod_jacobian = {}
 
-    def _compute(self):
+    def _compute(self) -> np.ndarray:
         raise NotImplementedError
 
-    def _upate_grad_to_jacobian(self):
+    def _jacobian(self) -> Dict[str, np.ndarray]:
         raise NotImplementedError
 
     def dump(self):

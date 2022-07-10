@@ -19,10 +19,11 @@ class Tensor(op.Operation):
             else:
                 self.value = np.array(value)
         self.requires_grad: bool = requires_grad
+        self.grad = None
 
     def set_value(self, value: Union[Number, np.ndarray]):
         self.value = np.array(value)
-        self._invalid_user_value()
+        self._invalidate_user_value()
 
     def __repr__(self):
         return f"{self.node_name} = {self.__class__.__name__}()"
@@ -31,6 +32,6 @@ class Tensor(op.Operation):
         # Tensor has no parents, so no need to compute
         pass
 
-    def _upate_grad_to_jacobian(self):
+    def _jacobian(self):
         # Tensor has no parents, so no need to update grad, local jacobian is just 1
         pass
