@@ -5,7 +5,7 @@ from chell.core import op
 
 
 class Loss(op.Operation):
-    """A special node that 1. has no parents, 2. activation in set at beginning"""
+    """Loss is just an alias of Operation with specific input"""
 
     def __init__(self, output: op.Operation, label: op.Operation):
         op.Operation.__init__(self, "loss", {"output": output, "label": label})

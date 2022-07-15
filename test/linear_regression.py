@@ -52,9 +52,9 @@ class LinearRegressionTest(unittest.TestCase):
             loss_v = loss.value[0]
             update_grad_fn()
             count += 1
-
-        self.assertTrue(np.allclose(params[0].value, true_a, rtol=5e-2))
-        self.assertTrue(np.allclose(params[1].value, true_b, rtol=5e-2))
+        x = np.random.rand(N, 1)
+        self.assertTrue(
+            np.allclose(np.matmul(params[0].value, x) + params[1].value, np.matmul(true_a, x) + true_b, rtol=1e-2))
         print(f"{title} finished with count:{count}")
 
     def test_direct_train(self):
@@ -62,8 +62,7 @@ class LinearRegressionTest(unittest.TestCase):
 
         def update_grad():
             for p in params:
-                grad = p.grad.mean(axis=0, keepdims=True)[0]
-                p.value -= grad * 0.01
+                p.value -= p.grad * 0.01
                 p.set_value(p.value)
 
         self.launch_test(model, x, params, update_grad, "test_direct_train")

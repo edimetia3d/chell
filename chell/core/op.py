@@ -290,7 +290,7 @@ class Operation:
     def __rsub__(self, other: OpArgT) -> "Operation":
         try_reverse = self.__sub__(other)
         if try_reverse:
-            return math.Neg(self.__sub__(other))
+            return math.Neg(try_reverse)
         return NotImplemented
 
     def __truediv__(self, other: OpArgT) -> "Operation":
@@ -300,6 +300,7 @@ class Operation:
         try_reverse = self.__truediv__(other)
         if try_reverse:
             return math.Reciprocal(try_reverse)
+        return NotImplemented
 
     def __matmul__(self, other: OpArgT) -> "Operation":
         return _binary_template(self, other, math.Matmul)
