@@ -33,6 +33,7 @@ class LinearRegressionTest(unittest.TestCase):
 
     def test_optim_adam_train(self):
         model, flat_img = self.create_model([300, 100])
+        model.dump()
         optim = adam.Adam(model.get_params(), lr=0.01)
         train_set = mnist.MNISTTrain()
         test_set = mnist.MNISTTest()
@@ -40,12 +41,13 @@ class LinearRegressionTest(unittest.TestCase):
         loss = softmax_cross_entropy.SoftMaxCrossEntropy(model, label_tensor)
         EPOCH = 1
         BATCHSIZE = 4
-        self.launch_model(test_set, flat_img, model, "initial result")
         print("\n")
+        self.launch_model(test_set, flat_img, model, "initial result")
+
         train_part, eval_part = train_set.split(0.9, shuffle=True)
         continue_passed = 0
         for epoch in range(EPOCH):
-            img_id = 0
+            batch_id = 0
             for raw_img, label in data_loader.DataLoader(train_part, batch_size=BATCHSIZE):
                 raw_img = [img.reshape((28 * 28, 1)) for img in raw_img]
                 img = np.concatenate(raw_img, axis=1)
@@ -57,8 +59,8 @@ class LinearRegressionTest(unittest.TestCase):
                 loss.forward()
                 loss.backward()
                 loss_v = loss.value[0]
-                if img_id % 100 == 0:
-                    print(f"epoch {epoch} img_id {img_id} loss:{loss_v:g} ", end="")
+                if batch_id % 100 == 0:
+                    print(f"epoch {epoch} batch_id {batch_id} loss:{loss_v:g} ", end="")
                     acc = self.launch_model(eval_part, flat_img, model, "eval result")
                     if acc > 0.9:
                         continue_passed += 1
@@ -67,8 +69,7 @@ class LinearRegressionTest(unittest.TestCase):
                     if continue_passed >= 10:
                         break
                 optim.step()
-                img_id += 1
-        print("\n")
+                batch_id += 1
 
         self.launch_model(test_set, flat_img, model, "final result")
 
