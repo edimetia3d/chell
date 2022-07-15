@@ -22,8 +22,8 @@ class GD(optimizer.Optimizer):
         for node_name, p in self.params.items():
             p_grad = p.grad
             if self.momentum > 0:
-                self.velocities[node_name] = self.momentum * self.velocities[node_name] + self.lr * p_grad
-                p.value -= self.velocities[node_name]
+                self.velocities[node_name] = self.momentum * self.velocities[node_name] - self.lr * p_grad
+                p.value += self.velocities[node_name]
             else:
                 p.value -= self.lr * p_grad
             p._invalidate_user_value()
