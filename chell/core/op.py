@@ -5,39 +5,46 @@ from typing import List, Union, Dict, ClassVar, TypeVar, Optional, Set
 
 import numpy as np
 
-from chell.core import tensor
+from chell import common
 from chell.core import uuid
-from chell.core.ops import common
 
 OpArgT = Union[Number, np.ndarray, "Operation"]
 OperationClass = TypeVar("OperationClass", bound="Operation")
 OperationClassVar = ClassVar[OperationClass]
-
 _loger = logging.getLogger(__name__)
 
 
-def _binary_template(lhs: "Operation", rhs: OpArgT, result_op: OperationClassVar) -> Union[
-    "Operation", None]:
-    if not isinstance(lhs, Operation):
-        return NotImplemented
-    if isinstance(rhs, np.ndarray) or np.isscalar(rhs) or isinstance(lhs, Operation):
-        return result_op(lhs, rhs)
-    else:
-        return NotImplemented
+def _binary_template(lhs: OpArgT, rhs: OpArgT, result_op: OperationClassVar) -> Union["Operation", None]:
+    if isinstance(lhs, np.ndarray) or np.isscalar(lhs) or isinstance(lhs, Operation):
+        if isinstance(rhs, np.ndarray) or np.isscalar(rhs) or isinstance(rhs, Operation):
+            return result_op(lhs, rhs)
+
+    return NotImplemented
 
 
 class Operation:
-    __used_op_name = set()
+    __created_node: Dict[str, weakref.ReferenceType] = {}
 
     @staticmethod
-    def __unique_op_name(name: str):
-        if name in Operation.__used_op_name:
-            name = f"{name}_{uuid.get()}"
-        Operation.__used_op_name.add(name)
-        return "%" + name
+    def __unique_op_name(name: str, new_op: "Operation") -> str:
+        mangle_name = "%" + name
+        if mangle_name in Operation.__created_node:
+            mangle_name = f"{mangle_name}_{uuid.get()}"
+        Operation.__created_node[mangle_name] = weakref.ref(new_op)
+        return mangle_name
+
+    @staticmethod
+    def get_created_op_by_name(name: str) -> Union["Operation", None]:
+        if name not in Operation.__created_node:
+            return None
+        ret = Operation.__created_node[name]()
+        if ret is None:
+            del Operation.__created_node[name]
+            return None
+        return ret
 
     def __init__(self, node_name: str, _inputs: Dict[str, OpArgT]):
-        self.node_name = Operation.__unique_op_name(node_name)  # node_name will also be the output's name of node
+        self.node_name = Operation.__unique_op_name(node_name, self)  # node_name will also be the output's name of node
         self.inputs: Dict[str, Operation] = self.__cleanup_op_arg_dict(_inputs)
 
         # self.value is the output of the node after forward, ONLY one is allowed
@@ -48,7 +55,7 @@ class Operation:
         # non-leaf node (i.e. non-Tensor operation) will have prod_jacobian of Dict[str, np.ndarray]
         self.prod_jacobian: Union[Dict[str, np.ndarray], np.ndarray] = {}
         self.on_grad_path = False  # whether this node is on the grad path
-        self.users: List[weakref.ref[Operation]] = []  # users of the node's output
+        self.users: List[weakref.ReferenceType[Operation]] = []  # users of the node's output
         is_all_variable_known = True
         for _, inode in self.inputs.items():
             if inode.value is None:
@@ -64,6 +71,16 @@ class Operation:
                 inputs[k] = tensor.Tensor(name="tmp_" + k, value=v)
         return inputs
 
+    def get_params(self) -> List["tensor.Tensor"]:
+        """A param is a tensor that must meet both 1. used to compute this node 2. tensor.requires_grad==True """
+        ret = []
+        for i in self.inputs.values():
+            if isinstance(i, tensor.Tensor) and i.requires_grad:
+                ret.append(i)
+            else:
+                ret.extend(i.get_params())
+        return ret
+
     def forward(self):
         """Forward may set new inputs values to the node"""
         for _, i in self.inputs.items():
@@ -74,6 +91,56 @@ class Operation:
         if self.value is None:
             self.value = self._compute()
             self._invalidate_user_value()
+
+    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
+        """ Generate input shape from shape_var_list.
+
+        If shape_var_list is None, then return length of shape_var_list, if the length is 0, it means any length is ok.
+
+        This feature is mainly used to generate random input shape for this node, so we can test it without having to
+        know the shape rule of the operation.
+        ```
+        N = node.input_shape_gen(None)
+        if N == 0:
+           N = randint(1,INT_MAX)
+        input_var_list = randint(1,INT_MAX,shape=(N,))
+        input_shapes = node.input_shape_gen(input_var_list)
+        output_shape = node.shape_infer(input_shapes)
+        ```
+
+        Args:
+            shape_var_list:
+
+        Returns:
+
+        """
+        raise NotImplementedError
+
+    def shape_forward(self) -> Dict[str, common.Shape]:
+        """Compute the shape of all node that required to compute this node.
+
+        Note:
+            All tensors that required to compute this node should have been set with a value that has a valid shape.
+
+        Returns:
+            A map of node-name to shape, all node that will be used to compute this node's shape will be included.
+
+        """
+        ret = {}
+        self.__shape_forward(ret)
+        return ret
+
+    def __shape_forward(self, ret: Dict[str, common.Shape]):
+        input_shapes = {}
+        for arg_name, i in self.inputs.items():
+            if i.node_name not in ret:
+                i.__shape_forward(ret)
+            input_shapes[arg_name] = ret[i.node_name]
+        shape = self.shape_infer(input_shapes)
+        ret[self.node_name] = shape
+
+    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
+        raise NotImplementedError
 
     def _invalidate_user_value(self):
         new_users = []
@@ -129,6 +196,8 @@ class Operation:
                 if user() is not None and user().on_grad_path:
                     for k, user_i in user().inputs.items():
                         if user_i is self:
+                            if k not in user().prod_jacobian:
+                                user().__backward(depth + 1, accumulate_grad)
                             if o_grad is None:
                                 o_grad = user().prod_jacobian[k].copy()
                             else:
@@ -137,9 +206,7 @@ class Operation:
             o_grad = np.ones(shape=(1, self.value.size))
 
         if isinstance(self, tensor.Tensor):
-            batch_size = int(o_grad.size / self.value.size)
-            final_shape = [batch_size, *self.value.shape]
-            final_out = o_grad.reshape(final_shape)
+            final_out = o_grad.reshape(self.value.shape)
             if self.grad is None or not accumulate_grad:
                 self.grad = final_out
             else:
@@ -152,11 +219,11 @@ class Operation:
                 self.prod_jacobian[k] = np.matmul(o_grad, jac[k])
             for _, i in self.inputs.items():
                 i.__backward(depth + 1, accumulate_grad)
-        all_input_graded = True
+        all_input_removed = True
         for _, i in self.inputs.items():
-            if i.on_grad_path and len(i.prod_jacobian) == 0:
-                all_input_graded = False
-        if all_input_graded:
+            if i.on_grad_path:
+                all_input_removed = False
+        if all_input_removed:
             self.on_grad_path = False
             if not isinstance(self, tensor.Tensor):
                 self.prod_jacobian = {}
@@ -171,7 +238,7 @@ class Operation:
         printed = set()
         self.__dump(printed)
 
-    def __dump(self, printed_nodes: Set["Operation"]):
+    def __dump(self, printed_nodes: Set[int]):
         for _, i_op in self.inputs.items():
             i_op.__dump(printed_nodes)
         if id(self) not in printed_nodes:
@@ -182,46 +249,84 @@ class Operation:
         return f"{self.node_name} = {self.__class__.__name__}({' , '.join([f'{k}={i.node_name}' for k, i in self.inputs.items()])})"
 
     def eq(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Eq)
+        return _binary_template(self, other, math.Eq)
 
     def all_close(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.AllClose)
+        return _binary_template(self, other, math.AllClose)
 
     def sum(self, axis: Optional[int] = None) -> "Operation":
-        return common.ReduceSum(self, axis)
+        return math.ReduceSum(self, axis)
+
+    ####
+    #    Operator Overloading
+    #    1. All binary operator that support commutative property will be overloaded.
+    #    e.g. `a * b` is the same as `b * a`, so `__rmul__` and `__mul__` will be overloaded.
+    #    2. If the `a op b` could be trickily implemented by `fun(b rop a)`, it will be overloaded.
+    #    e.g. `a - b` could be implemented by `(b - a) -1`,so `__rsub__` will be overloaded.
+    ####
 
     def __eq__(self, other: OpArgT) -> bool:
+        """Warning: operator== returns a bool, not an Operation"""
         if isinstance(other, Operation):
             return np.all(self.value == other.value)
         else:
             return np.all(self.value == other)
 
     def __mul__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Mul)
+        return _binary_template(self, other, math.Mul)
+
+    def __rmul__(self, other: OpArgT) -> "Operation":
+        return self.__mul__(other)
 
     def __add__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Add)
+        return _binary_template(self, other, math.Add)
+
+    def __radd__(self, other: OpArgT) -> "Operation":
+        return self.__add__(other)
 
     def __sub__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Sub)
+        return _binary_template(self, other, math.Sub)
+
+    def __rsub__(self, other: OpArgT) -> "Operation":
+        try_reverse = self.__sub__(other)
+        if try_reverse:
+            return math.Neg(self.__sub__(other))
+        return NotImplemented
 
     def __truediv__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Div)
+        return _binary_template(self, other, math.Div)
+
+    def __rtruediv__(self, other: OpArgT) -> "Operation":
+        try_reverse = self.__truediv__(other)
+        if try_reverse:
+            return math.Reciprocal(try_reverse)
 
     def __matmul__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Matmul)
+        return _binary_template(self, other, math.Matmul)
+
+    def __rmatmul__(self, other: OpArgT) -> "Operation":
+        if isinstance(other, np.ndarray):
+            return math.Transpose(self.__matmul__(other.T))
+        elif np.isscalar(other):
+            return self.__matmul__(np.array([other]))
+        # if other is an Operation, this function will never be called, so we don't need to check it
+        return NotImplemented
 
     def __pow__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Pow)
+        return _binary_template(self, other, math.Pow)
 
     def __mod__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.Mod)
+        return _binary_template(self, other, math.Mod)
 
     def __divmod__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.DivMod)
+        return _binary_template(self, other, math.DivMod)
 
     def __lt__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.LT)
+        return _binary_template(self, other, math.LT)
 
     def __le__(self, other: OpArgT) -> "Operation":
-        return _binary_template(self, other, common.LE)
+        return _binary_template(self, other, math.LE)
+
+
+from chell.core import tensor  # must be at tail to avoid circular import
+from chell.core.ops import math  # must be at tail to avoid circular import

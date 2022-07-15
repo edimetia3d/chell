@@ -11,18 +11,19 @@ class GD(optimizer.Optimizer):
         super().__init__(params)
         self.lr: float = lr
         self.momentum: float = momentum
+        if momentum < 0:
+            raise ValueError("momentum must be non-negative")
         if momentum > 0:
-            if momentum > 1:
-                raise ValueError("momentum must be between 0 and 1")
             self.velocities = {}
             for p in params:
                 self.velocities[p.node_name]: Dict[str, np.ndarray] = np.zeros(shape=p.value.shape)
 
     def step(self) -> None:
         for node_name, p in self.params.items():
-            mean_grad = p.grad.mean(axis=0, keepdims=True)[0]
+            p_grad = p.grad
             if self.momentum > 0:
-                self.velocities[node_name] = self.momentum * self.velocities[node_name] + self.lr * mean_grad
+                self.velocities[node_name] = self.momentum * self.velocities[node_name] + self.lr * p_grad
                 p.value -= self.velocities[node_name]
             else:
-                p.value -= self.lr * mean_grad
+                p.value -= self.lr * p_grad
+            p._invalidate_user_value()

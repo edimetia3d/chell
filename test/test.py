@@ -1,5 +1,6 @@
 import numpy as np
 
+from chell.core import op
 from chell.core import tensor
 
 shape = (2, 3)
@@ -29,3 +30,7 @@ rmat = tensor.Tensor("rmat", np.ones((shape[1], 4)))
 mm = z2 @ rmat
 mm.backward()
 print(x.grad)
+
+shapes = mm.shape_forward()
+assert shapes[mm.node_name] == mm.value.shape
+assert op.Operation.get_created_op_by_name(mm.node_name) is mm
