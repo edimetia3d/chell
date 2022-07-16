@@ -38,7 +38,7 @@ class SoftMaxCrossEntropy(loss.Loss):
         output_softmax = output.value.copy()
         output_softmax[output_softmax > 1e2] = 1e2
         exp_v = np.exp(output_softmax)
-        output_softmax = exp_v / np.sum(exp_v, axis=0, keepdims=True) + 1e-10  # we will do log later
+        output_softmax = exp_v / (np.sum(exp_v, axis=0, keepdims=True) + 1e-10) + 1e-10  # we will do log later
         return output_softmax
 
     def _jacobian(self):

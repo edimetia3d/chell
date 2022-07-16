@@ -49,7 +49,7 @@ class SoftMax(_Activation):
         a = ix.value.copy()
         a[a > 1e2] = 1e2
         exp_v = np.exp(a)
-        return exp_v / np.sum(exp_v, axis=self.softmax_axis, keepdims=True)
+        return exp_v / (np.sum(exp_v, axis=self.softmax_axis, keepdims=True) + 1e-10)
 
     def _jacobian(self) -> Dict[str, np.ndarray]:
         raise NotImplementedError  # TODO, add it when needed
