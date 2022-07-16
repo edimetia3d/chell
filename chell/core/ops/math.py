@@ -231,6 +231,14 @@ class Transpose(_UnaryOp):
     def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
         return input_shapes["x"][::-1]
 
+    def _jacobian(self):
+        input_x = self.inputs["x"].value
+        ind = np.arange(0, input_x.size).reshape(input_x.shape).T
+        jac = np.zeros((input_x.size, input_x.size))
+        for col, row in enumerate(ind.ravel()):
+            jac[col, row] = 1
+        return {"x": jac}
+
 
 class _Reduce(op.Operation):
     _reduce_np_func: Callable[..., np.ndarray] = None
