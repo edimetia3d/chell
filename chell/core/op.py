@@ -181,6 +181,7 @@ class Operation:
         return any_input_on_path
 
     def __backward(self, depth: int, accumulate_grad: bool) -> None:
+        # Every node is able to call __backward, the backward will stop automatically when on_grad_path is False
         if not self.on_grad_path:
             if depth == 0:
                 _loger.warning(f"Backward ignored, for all tensors needed to calculate {self} do not require grad.")
@@ -192,16 +193,20 @@ class Operation:
 
         if depth != 0:
             o_grad = None
-            for user in self.users:
-                if user() is not None and user().on_grad_path:
-                    for k, user_i in user().inputs.items():
-                        if user_i is self:
-                            if k not in user().prod_jacobian:
-                                user().__backward(depth + 1, accumulate_grad)
-                            if o_grad is None:
-                                o_grad = user().prod_jacobian[k].copy()
-                            else:
-                                o_grad += user().prod_jacobian[k]
+            for user_ref in self.users:
+                user = user_ref()
+                if user is not None and user.on_grad_path:
+                    for user_input_k_name, user_input_k in user.inputs.items():
+                        if user_input_k is self:
+                            if len(user.prod_jacobian) == 0:  # user's jacobian may not be computed yet
+                                user.__backward(depth + 1, accumulate_grad)
+                            assert len(
+                                user.prod_jacobian) > 0, "Unknown error, jacobian should have been computed by now"
+                            if user_input_k_name in user.prod_jacobian:  # node may have no jacobian on some input
+                                if o_grad is None:
+                                    o_grad = user.prod_jacobian[user_input_k_name].copy()
+                                else:
+                                    o_grad += user.prod_jacobian[user_input_k_name]
         else:
             o_grad = np.ones(shape=(1, self.value.size))
 
@@ -214,14 +219,14 @@ class Operation:
 
         else:
             jac = self._jacobian()
-            assert jac.keys() == self.inputs.keys()
-            for k, i in self.inputs.items():
-                self.prod_jacobian[k] = np.matmul(o_grad, jac[k])
-            for _, i in self.inputs.items():
-                i.__backward(depth + 1, accumulate_grad)
+            assert set(jac.keys()).issubset(set(self.inputs.keys())), "Jacobian keys must be subset of input keys"
+            for input_i_name, input_i_jac in jac.items():
+                self.prod_jacobian[input_i_name] = np.matmul(o_grad, input_i_jac)
+            for _, input_i in self.inputs.items():
+                input_i.__backward(depth + 1, accumulate_grad)
         all_input_removed = True
-        for _, i in self.inputs.items():
-            if i.on_grad_path:
+        for _, input_i in self.inputs.items():
+            if input_i.on_grad_path:
                 all_input_removed = False
         if all_input_removed:
             self.on_grad_path = False
