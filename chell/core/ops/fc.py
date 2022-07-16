@@ -11,7 +11,11 @@ class FullyConnect(op.Operation):
     def __init__(self, M_W: int, M_X: int, N_X: int, x: op.OpArgT, Act: op.OperationClassVar):
         w = tensor.Tensor("fc.weight", np.random.randn(M_W, M_X), requires_grad=True)
         b = tensor.Tensor("fc.bias", np.random.randn(M_W, N_X), requires_grad=True)
-        delegate = Act(w @ x + b)
+        linear = w @ x + b
+        if Act is None:
+            delegate = linear
+        else:
+            delegate = Act(linear)
         super().__init__("fc", {"delegate": delegate})
 
     def _compute(self) -> np.ndarray:
