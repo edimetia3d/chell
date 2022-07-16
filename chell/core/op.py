@@ -166,48 +166,63 @@ class Operation:
 
         """
         # on_grad_path is False by default, and will be cleared during backward
-        self.__mark_all_grad_node()
-        return self.__backward(0, accumulate_grad)
+        all_grad_nodes = []
+        self.__mark_all_grad_node(all_grad_nodes)
+        to_clear_mark = all_grad_nodes.copy()
+        if not self.on_grad_path:
+            _loger.warning(f"Backward ignored, for all tensors needed to calculate {self} do not require grad.")
+            return
+        self.__backward(accumulate_grad, True)
+        assert all_grad_nodes[-1] is self
+        del all_grad_nodes[-1]
 
-    def __mark_all_grad_node(self):
+        # todo: use topological sort is a better solution
+        N = len(all_grad_nodes)
+        while N != 0:
+            for i in range(N - 1, -1, -1):
+                node = all_grad_nodes[i]
+                if node.__is_all_user_jacobian_computed():
+                    node.__backward(accumulate_grad)
+                    del all_grad_nodes[i]
+                    break
+            N = len(all_grad_nodes)
+        for node in to_clear_mark:
+            node.on_grad_path = False
+            if isinstance(node, tensor.Tensor):
+                node.prod_jacobian = {}
+
+    def __mark_all_grad_node(self, ret: List["Operation"]):
         any_input_on_path = False
         if isinstance(self, tensor.Tensor) and self.requires_grad:
             any_input_on_path = True
 
         for _, i in self.inputs.items():
-            if i.__mark_all_grad_node():
+            if i.__mark_all_grad_node(ret):
                 any_input_on_path = True
         self.on_grad_path = any_input_on_path
+        if any_input_on_path and self not in ret:
+            ret.append(self)
         return any_input_on_path
 
-    def __backward(self, depth: int, accumulate_grad: bool) -> None:
-        # Every node is able to call __backward, the backward will stop automatically when on_grad_path is False
-        if not self.on_grad_path:
-            if depth == 0:
-                _loger.warning(f"Backward ignored, for all tensors needed to calculate {self} do not require grad.")
-            return
-        if depth == 0 and self.value.size != 1:
-            _loger.warning(
-                "Calling backward on a node that has non-scalar output,"
-                "Chell will update grad like doing backward on `node.sum()`")
-
-        if depth != 0:
-            o_grad = None
-            for user_ref in self.users:
-                user = user_ref()
-                if user is not None and user.on_grad_path:
-                    for user_input_k_name, user_input_k in user.inputs.items():
-                        if user_input_k is self:
-                            if len(user.prod_jacobian) == 0:  # user's jacobian may not be computed yet
-                                user.__backward(depth + 1, accumulate_grad)
-                            assert len(
-                                user.prod_jacobian) > 0, "Unknown error, jacobian should have been computed by now"
-                            if user_input_k_name in user.prod_jacobian:  # node may have no jacobian on some input
-                                if o_grad is None:
-                                    o_grad = user.prod_jacobian[user_input_k_name].copy()
-                                else:
-                                    o_grad += user.prod_jacobian[user_input_k_name]
-        else:
+    def __backward(self, accumulate_grad: bool, at_root: bool = False) -> None:
+        o_grad = None
+        for user_ref in self.users:
+            user = user_ref()
+            if user is not None and user.on_grad_path:
+                for user_input_k_name, user_input_k in user.inputs.items():
+                    if user_input_k is self:
+                        assert len(
+                            user.prod_jacobian) > 0, "Unknown error, jacobian should have been computed by now"
+                        if o_grad is None:
+                            o_grad = user.prod_jacobian[user_input_k_name].copy()
+                        else:
+                            o_grad += user.prod_jacobian[user_input_k_name]
+        if o_grad is None:
+            assert at_root, "Unknown error, o_grad should have been computed by now"
+            if self.value.size != 1:
+                _loger.warning(
+                    "Calling backward on a node that has non-scalar output,"
+                    "Chell will update grad like doing backward on `node.sum()`")
             o_grad = np.ones(shape=(1, self.value.size))
 
         if isinstance(self, tensor.Tensor):
@@ -216,28 +231,25 @@ class Operation:
                 self.grad = final_out
             else:
                 self.grad += final_out
-
         else:
             jac = self._jacobian()
             assert set(jac.keys()).issubset(set(self.inputs.keys())), "Jacobian keys must be subset of input keys"
             for input_i_name, input_i_jac in jac.items():
                 self.prod_jacobian[input_i_name] = np.matmul(o_grad, input_i_jac)
-            for _, input_i in self.inputs.items():
-                input_i.__backward(depth + 1, accumulate_grad)
-        all_input_removed = True
-        for _, input_i in self.inputs.items():
-            if input_i.on_grad_path:
-                all_input_removed = False
-        if all_input_removed:
-            self.on_grad_path = False
-            if not isinstance(self, tensor.Tensor):
-                self.prod_jacobian = {}
 
     def _compute(self) -> np.ndarray:
         raise NotImplementedError
 
     def _jacobian(self) -> Dict[str, np.ndarray]:
         raise NotImplementedError
+
+    def __is_all_user_jacobian_computed(self) -> bool:
+        for userref in self.users:
+            user = userref()
+            if user is not None and user.on_grad_path:
+                if len(user.prod_jacobian) == 0:
+                    return False
+        return True
 
     def dump(self):
         printed = set()
@@ -250,7 +262,7 @@ class Operation:
             print(self)
             printed_nodes.add(id(self))
 
-    def __str__(self):
+    def __repr__(self):
         return f"{self.node_name} = {self.__class__.__name__}({' , '.join([f'{k}={i.node_name}' for k, i in self.inputs.items()])})"
 
     def eq(self, other: OpArgT) -> "Operation":
@@ -270,7 +282,7 @@ class Operation:
     #    e.g. `a - b` could be implemented by `(b - a) -1`,so `__rsub__` will be overloaded.
     ####
 
-    def __eq__(self, other: OpArgT) -> bool:
+    def alleq(self, other: OpArgT) -> bool:
         """Warning: operator== returns a bool, not an Operation"""
         if isinstance(other, Operation):
             return np.all(self.value == other.value)
