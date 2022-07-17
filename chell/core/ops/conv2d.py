@@ -64,7 +64,9 @@ class Conv2D(op.Operation):
         jac_kernel = np.zeros((self.value.size, kernel.size))
         for row, ind in enumerate(np.ndindex(*final_shape)):
             for offset_kernel, ind_kernel in enumerate(np.ndindex(*kernel.shape)):
-                x_ind = tuple(np.add(ind, ind_kernel))
+                x_ind = np.add(ind, ind_kernel)
+                x_ind[0] = ind_kernel[0]
+                x_ind = tuple(x_ind)
                 jac_kernel[row, offset_kernel] = x[x_ind]
                 multi_x_ind = [[x] for x in x_ind]
                 offset = np.ravel_multi_index(multi_x_ind, x.shape)

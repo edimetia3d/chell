@@ -30,18 +30,19 @@ class Padding2D(op.Operation):
     def __init__(self, x: op.OpArgT, padding_config: PaddingConfig):
         """x is a 3D tensor of shape (C, H, W)"""
         self.padding_config = padding_config
-        super().__init__("padding", {"x": x})
+        super().__init__("padding2d", {"x": x})
 
     def _compute(self) -> np.ndarray:
         x = self.inputs["x"].value
         left_up_i = self.padding_config.padding_size[2]
         left_up_j = self.padding_config.padding_size[0]
-        width = x.shape[1] + self.padding_config.padding_size[0] + self.padding_config.padding_size[1]
-        height = x.shape[2] + self.padding_config.padding_size[2] + self.padding_config.padding_size[3]
+        height = x.shape[1] + self.padding_config.padding_size[2] + self.padding_config.padding_size[3]
+        width = x.shape[2] + self.padding_config.padding_size[0] + self.padding_config.padding_size[1]
+
         assert self.padding_config.padding_mode == PaddingMode.CLAMP_TO_CONST
 
-        ret = np.full(shape=(x.shape[0], height, width), fill_value=self.padding_config.clamp_value)
-        ret[:, left_up_i:(left_up_i + x.shape[1]), left_up_j:(left_up_j + x.shape[2])] = x
+        ret = np.full(shape=(x.shape[0], height, width), fill_value=self.padding_config.clamp_value, dtype=x.dtype)
+        ret[:, left_up_i:int(left_up_i + x.shape[1]), left_up_j:int(left_up_j + x.shape[2])] = x
         return ret
 
     def _jacobian(self) -> Dict[str, np.ndarray]:

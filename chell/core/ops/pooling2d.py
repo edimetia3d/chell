@@ -20,15 +20,10 @@ class _Polling(op.Operation):
         """x is a 3D tensor of shape (C, H, W)"""
         self.ksize = ksize
         self.stride = stride
-        super().__init__("conv2d", {"x": x})
+        super().__init__("polling2d", {"x": x})
 
     def _kerner_shape(self):
-        return (self.inputs["x"].value.shape[0],) + tuple(self.ksize)
-
-    def _shape_without_stride(self):
-        x = self.inputs["x"].value
-        kernel_shape = self._kerner_shape()
-        return tuple(np.subtract(x.shape, kernel_shape) + 1)
+        return (1,) + tuple(self.ksize)
 
     def _x_stride_ratio(self):
         return (1, self.stride[0], self.stride[1])
@@ -37,8 +32,8 @@ class _Polling(op.Operation):
         x = self.inputs["x"].value
         kernel_shape = self._kerner_shape()
         kernel_size = np.prod(kernel_shape)
-        final_shape = tuple(
-            np.ceil(np.divide(self._shape_without_stride(), self._x_stride_ratio())).astype(dtype=np.int))
+        no_stride_shape = (x.shape[0],) + tuple(np.subtract(x.shape[1:3], kernel_shape[1:3]) + 1)
+        final_shape = tuple(np.ceil(np.divide(no_stride_shape, self._x_stride_ratio())).astype(dtype=np.int))
         view_shape = final_shape + kernel_shape
         strides = tuple(np.multiply(x.strides, self._x_stride_ratio())) + x.strides
 
@@ -61,13 +56,13 @@ class MaxPolling(_Polling):
         kernel_shape = self._kerner_shape()
         jac_x = np.zeros((self.value.size, x.size))
         for row, _ind in enumerate(np.ndindex(*final_shape)):
-            ind = tuple(np.multiply(_ind, self._x_stride_ratio()).astype(dtype=np.int))
+            ind = tuple(np.multiply(_ind, self._x_stride_ratio()).astype(dtype=np.int32))
             kernel_offset = self._max_v_kernel_offset[row]
             ind_in_kernel = np.unravel_index([kernel_offset], kernel_shape)
             real_ind = np.add(ind, next(zip(*ind_in_kernel)))
             multi_x_ind = [[x] for x in real_ind]
             offset = np.ravel_multi_index(multi_x_ind, x.shape)
-            jac_x[row, offset] = 1
+            jac_x[row, offset[0]] = 1
         return {"x": jac_x}
 
 

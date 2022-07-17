@@ -25,7 +25,6 @@ class Concat(op.Operation):
         accu_ind = 0
         final_shape = self.value.shape
         jac = {}
-        axis = self.axis
         for i in range(len(self.inputs)):
             input_i = self.inputs[f"x{i}"].value
             if i != 0:

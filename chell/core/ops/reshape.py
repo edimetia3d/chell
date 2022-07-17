@@ -13,7 +13,7 @@ class Reshape(op.Operation):
     def _compute(self) -> np.ndarray:
         x = self.inputs["x"].value
         new_shape = self.inputs["new_shape"].value
-        return x.reshape(shape=tuple(new_shape))
+        return x.reshape(tuple(new_shape))
 
     def _jacobian(self) -> Dict[str, np.ndarray]:
         x = self.inputs["x"].value
