@@ -6,6 +6,7 @@ from typing import List, Union, Dict, ClassVar, TypeVar, Optional, Set
 import numpy as np
 
 from chell import common
+from chell.core import device
 from chell.core import uuid
 
 OpArgT = Union[Number, np.ndarray, "Operation"]
@@ -24,6 +25,7 @@ def _binary_template(lhs: OpArgT, rhs: OpArgT, result_op: OperationClassVar) -> 
 
 class Operation:
     __created_node: Dict[str, weakref.ReferenceType] = {}
+    __active_device = device.AvailableDevices()[0]("default", 0)
 
     @staticmethod
     def __unique_op_name(name: str, new_op: "Operation") -> str:
