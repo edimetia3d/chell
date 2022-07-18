@@ -232,16 +232,31 @@ class Operation:
             else:
                 self.grad += final_out
         else:
-            jac = self._jacobian()
-            assert set(jac.keys()).issubset(set(self.inputs.keys())), "Jacobian keys must be subset of input keys"
-            for input_i_name, input_i_jac in jac.items():
-                self.prod_jacobian[input_i_name] = np.matmul(o_grad, input_i_jac)
+            self.prod_jacobian = self._producted_jacobian(o_grad)
 
     def _compute(self) -> np.ndarray:
         raise NotImplementedError
 
     def _jacobian(self) -> Dict[str, np.ndarray]:
+        """Compute the jacobian on every input.
+
+        Note:
+            User could override either this method or `_producted_jacobian`, both will be fine.
+            1. If only override this one, the jacobian will get producted by _producted_jacobian automatically.
+            2. If only _producted_jacobian, the accumulate_grad will be pass to _producted_jacobian, user should product
+               it manually.
+            3. If override both, only _producted_jacobian will be used.
+
+        """
         raise NotImplementedError
+
+    def _producted_jacobian(self, o_prod: np.ndarray) -> Dict[str, np.ndarray]:
+        """ See `_jacobian` for more information. """
+        jac = self._jacobian()
+        assert set(jac.keys()).issubset(set(self.inputs.keys())), "Jacobian keys must be subset of input keys"
+        for input_i_name, input_i_jac in jac.items():
+            jac[input_i_name] = np.matmul(o_prod, input_i_jac)
+        return jac
 
     def __is_all_user_jacobian_computed(self) -> bool:
         for userref in self.users:
