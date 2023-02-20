@@ -21,7 +21,7 @@ class AdaGrad(optimizer.Optimizer):
                 node_name] + self._accu_beta() * np.power(p_grad, 2)
             apply = self.lr / (np.sqrt(self.grad_accumulator[node_name]) + 1e-8) * p_grad
             p.value -= apply
-            p._invalidate_user_value()
+            p.invalidate_user_value()
 
     def _accu_alpha(self):
         return 1

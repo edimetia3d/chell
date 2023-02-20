@@ -1,8 +1,5 @@
-from typing import List, Union, Dict
-
 import numpy as np
 
-from chell import common
 from chell.core import loss
 from chell.core import op
 
@@ -19,7 +16,6 @@ class SoftMaxCrossEntropy(loss.Loss):
         2. Every col of output MUST be a probability M * 1 vector.
         """
         super().__init__(output, label)
-
 
     def _compute(self):
         output_softmax = self.__output_softmax()

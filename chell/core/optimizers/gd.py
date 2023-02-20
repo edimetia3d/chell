@@ -26,4 +26,4 @@ class GD(optimizer.Optimizer):
                 p.value += self.velocities[node_name]
             else:
                 p.value -= self.lr * p_grad
-            p._invalidate_user_value()
+            p.invalidate_user_value()

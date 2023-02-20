@@ -27,4 +27,4 @@ class Adam(optimizer.Optimizer):
                     1 - self.beta2) * p_grad * p_grad
             apply = self.lr * self.v_accumulator[node_name] / (np.sqrt(self.a_accumulator[node_name]) + 1e-8)
             p.value -= apply
-            p._invalidate_user_value()
+            p.invalidate_user_value()

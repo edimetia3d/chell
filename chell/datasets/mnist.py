@@ -2,11 +2,28 @@ import gzip
 import os
 import shutil
 import urllib.request
+import hashlib
 
 import numpy as np
 
-from chell import common
 from chell import dataset
+
+
+def sha1(file_path: str, size_limit: int = 65536) -> str:
+    if size_limit is None:
+        buf_size = os.path.getsize(file_path)
+    else:
+        buf_size = min(size_limit, os.path.getsize(file_path))
+    sha1 = hashlib.sha1()
+    with open(file_path, 'rb') as f:
+        data = f.read(buf_size)
+        if not data:
+            return None
+
+        sha1.update(data)
+
+    return sha1.hexdigest()
+
 
 _TRAIN_SET = "http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz"
 _TRAIN_SET_HASH = "e1f0426829a11cbe2a9c44ac744c36910c47c7aa"
@@ -53,7 +70,7 @@ class MNIST(dataset.DataSet):
 
     def _update_cache(self, download_link: str, gz_file: str, hash: str):
         final_file = os.path.join(self.cache_dir, os.path.basename(gz_file).split(".")[0])
-        if not os.path.exists(gz_file) or hash != common.sha1(final_file):
+        if not os.path.exists(gz_file) or hash != sha1(final_file):
             urllib.request.urlretrieve(download_link, gz_file, _show_link_progress(download_link))
             with gzip.open(gz_file, 'r') as f_in:
                 with open(final_file, 'wb') as f_out:
