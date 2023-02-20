@@ -15,14 +15,6 @@ class _Activation(op.Operation):
             op_name = self.__class__.__name__.lower()
         super().__init__(op_name, {"x": x})
 
-    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
-        return input_shapes["x"]
-
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        if shape_var_list is None:
-            return 0
-        else:
-            return {"x": tuple(shape_var_list)}
 
 
 class Logistic(_Activation):

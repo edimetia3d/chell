@@ -39,9 +39,6 @@ mm = z2 @ rmat
 mm.backward()
 print(x.grad)
 
-shapes = mm.shape_forward()
-assert shapes[mm.node_name] == mm.value.shape
-assert op.Operation.get_created_op_by_name(mm.node_name) is mm
 
 a = tensor.Tensor("a", np.ones((5, 4)), requires_grad=True)
 b = tensor.Tensor("b", np.ones((3, 4)))
@@ -74,7 +71,7 @@ pad = padding2d.Padding2D(x, pad_config)
 pad.backward()
 
 a = tensor.Tensor("a", np.ones((5, 4)), requires_grad=True)
-a_r = reshape.Reshape(a, (1, 4, 5))
+a_r = reshape.Reshape(a, np.array((1, 4, 5)))
 a_r.backward()
 
 x = tensor.Tensor("x", np.random.random((3, 5, 6)), requires_grad=True)

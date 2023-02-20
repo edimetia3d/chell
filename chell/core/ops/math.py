@@ -23,16 +23,7 @@ class _BinaryOp(op.Operation):
         iy = self.inputs["y"]
         return self.__class__._binary_np_func(ix.value, iy.value)
 
-    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
-        # treat all Binary OP as elementwise by default
-        return input_shapes["x"]
 
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        # treat all Binary OP as elementwise by default
-        if shape_var_list is None:
-            return 2
-        else:
-            return {"x": tuple(shape_var_list), "y": tuple(shape_var_list)}
 
 
 def _eltwise_jac(op: op.Operation,
@@ -173,18 +164,7 @@ class Matmul(_BinaryOp):
         jac = {"x": grad_x, "y": grad_y}
         return jac
 
-    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
-        x_shape = input_shapes["x"]
-        y_shape = input_shapes["y"]
-        M = x_shape[0]
-        N = y_shape[1]
-        return (M, N)
 
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        if shape_var_list is None:
-            return 3
-        else:
-            return {"x": (shape_var_list[0], shape_var_list[1]), "y": (shape_var_list[1], shape_var_list[2])}
 
 
 class _UnaryOp(op.Operation):
@@ -201,14 +181,7 @@ class _UnaryOp(op.Operation):
         ix = self.inputs["x"]
         return self.__class__._unary_np_func(ix.value)
 
-    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
-        return input_shapes["x"]
 
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        if shape_var_list is None:
-            return 0
-        else:
-            return {"x": tuple(shape_var_list)}
 
 
 class Neg(_UnaryOp):
@@ -222,14 +195,7 @@ class Reciprocal(_UnaryOp):
 class Transpose(_UnaryOp):
     _binary_np_func: Callable[[Any, Any], np.ndarray] = np.transpose
 
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        if shape_var_list is None:
-            return 2
-        else:
-            return {"x": (shape_var_list[0], shape_var_list[1])}
 
-    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
-        return input_shapes["x"][::-1]
 
     def _jacobian(self):
         input_x = self.inputs["x"].value
@@ -258,18 +224,6 @@ class _Reduce(op.Operation):
             v = np.array([v])
         return v
 
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        if shape_var_list is None:
-            return 0
-        else:
-            return {"x": tuple(shape_var_list)}
-
-    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
-        x_shape = input_shapes["x"]
-        if self.axis is None:
-            return (1,)
-        else:
-            return tuple(x_shape[:self.axis] + [1] + x_shape[self.axis + 1:])
 
 
 class ReduceSum(_Reduce):

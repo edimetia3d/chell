@@ -20,11 +20,6 @@ class SoftMaxCrossEntropy(loss.Loss):
         """
         super().__init__(output, label)
 
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        if shape_var_list is None:
-            return 2
-        else:
-            return {"output": tuple(shape_var_list), "label": tuple(shape_var_list)}
 
     def _compute(self):
         output_softmax = self.__output_softmax()

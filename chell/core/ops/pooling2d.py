@@ -33,7 +33,7 @@ class _Polling(op.Operation):
         kernel_shape = self._kerner_shape()
         kernel_size = np.prod(kernel_shape)
         no_stride_shape = (x.shape[0],) + tuple(np.subtract(x.shape[1:3], kernel_shape[1:3]) + 1)
-        final_shape = tuple(np.ceil(np.divide(no_stride_shape, self._x_stride_ratio())).astype(dtype=np.int))
+        final_shape = tuple(np.ceil(np.divide(no_stride_shape, self._x_stride_ratio())).astype(dtype=np.int32))
         view_shape = final_shape + kernel_shape
         strides = tuple(np.multiply(x.strides, self._x_stride_ratio())) + x.strides
 

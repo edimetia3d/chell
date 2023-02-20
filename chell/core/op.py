@@ -5,8 +5,6 @@ from typing import List, Union, Dict, ClassVar, TypeVar, Optional, Set
 
 import numpy as np
 
-from chell import common
-from chell.core import device
 from chell.core import uuid
 
 OpArgT = Union[Number, np.ndarray, "Operation"]
@@ -23,55 +21,57 @@ def _binary_template(lhs: OpArgT, rhs: OpArgT, result_op: OperationClassVar) -> 
     return NotImplemented
 
 
+__created_node: Set[str] = set()
+
+
+def _unique_op_name(name: str) -> str:
+    mangle_name = "%" + name
+    if mangle_name in __created_node:
+        mangle_name = f"{mangle_name}_{uuid.get()}"
+    __created_node.add(mangle_name)
+    return mangle_name
+
+
+def _cleanup_op_arg_dict(inputs_: Dict[str, OpArgT]) -> Dict[str, "Operation"]:
+    inputs = inputs_.copy()
+    for k, v in inputs.items():
+        if isinstance(v, Operation):
+            continue
+        elif isinstance(v, np.ndarray) or np.isscalar(v):
+            inputs[k] = tensor.Tensor(name="tmp_" + k, value=v)
+        else:
+            raise ValueError(f"Invalid input type {type(v)} for {k}")
+    return inputs
+
+
 class Operation:
-    __created_node: Dict[str, weakref.ReferenceType] = {}
-    __active_device = device.AvailableDevices()[0]("default", 0)
+    """ Operation is the core class of computing graph. It is a node in the graph.
 
-    @staticmethod
-    def __unique_op_name(name: str, new_op: "Operation") -> str:
-        mangle_name = "%" + name
-        if mangle_name in Operation.__created_node:
-            mangle_name = f"{mangle_name}_{uuid.get()}"
-        Operation.__created_node[mangle_name] = weakref.ref(new_op)
-        return mangle_name
+    Every operation has a name, and a set of inputs. The output of operation is the value of the node.
 
-    @staticmethod
-    def get_created_op_by_name(name: str) -> Union["Operation", None]:
-        if name not in Operation.__created_node:
-            return None
-        ret = Operation.__created_node[name]()
-        if ret is None:
-            del Operation.__created_node[name]
-            return None
-        return ret
+    """
 
     def __init__(self, node_name: str, _inputs: Dict[str, OpArgT]):
-        self.node_name = Operation.__unique_op_name(node_name, self)  # node_name will also be the output's name of node
-        self.inputs: Dict[str, Operation] = self.__cleanup_op_arg_dict(_inputs)
+        self.node_name = _unique_op_name(node_name)
+        self.inputs: Dict[str, Operation] = _cleanup_op_arg_dict(_inputs)
 
-        # self.value is the output of the node after forward, ONLY one is allowed
-        self.value: Union[
-            np.ndarray, None] = None
-        # producted jacobian from root to current node
-        # leaf node (i.e. Tensor) will have grad of np.ndarray
-        # non-leaf node (i.e. non-Tensor operation) will have prod_jacobian of Dict[str, np.ndarray]
-        self.prod_jacobian: Union[Dict[str, np.ndarray], np.ndarray] = {}
-        self.on_grad_path = False  # whether this node is on the grad path
-        self.users: List[weakref.ReferenceType[Operation]] = []  # users of the node's output
-        is_all_variable_known = True
+        # value is the output of the node after forward, a Operation only could have one output
+        self.value: Union[np.ndarray, None] = None
+        # it is the **accumulated** jacobian
+        self.jacobian: Dict[str, np.ndarray] = {}
+
+        self._on_grad_path = False  # whether this node is on the grad path
+        self._users: List[weakref.ReferenceType[Operation]] = []  # users of the node's output
+
+        # Try to compute the value of the node when init
+        # and register this node to input's user
+        is_all_input_known = True
         for _, inode in self.inputs.items():
             if inode.value is None:
-                is_all_variable_known = False
-            inode.users.append(weakref.ref(self))
-        if is_all_variable_known:
+                is_all_input_known = False
+            inode._users.append(weakref.ref(self))
+        if is_all_input_known:
             self.value = self._compute()
-
-    def __cleanup_op_arg_dict(self, _inputs) -> Dict[str, "Operation"]:
-        inputs = _inputs.copy()
-        for k, v in inputs.items():
-            if not isinstance(v, Operation):
-                inputs[k] = tensor.Tensor(name="tmp_" + k, value=v)
-        return inputs
 
     def get_params(self) -> List["tensor.Tensor"]:
         """A param is a tensor that must meet both 1. used to compute this node 2. tensor.requires_grad==True """
@@ -94,64 +94,14 @@ class Operation:
             self.value = self._compute()
             self._invalidate_user_value()
 
-    def input_shape_gen(self, shape_var_list: List[int] = None) -> Union[Dict[str, common.Shape], int]:
-        """ Generate input shape from shape_var_list.
-
-        If shape_var_list is None, then return length of shape_var_list, if the length is 0, it means any length is ok.
-
-        This feature is mainly used to generate random input shape for this node, so we can test it without having to
-        know the shape rule of the operation.
-        ```
-        N = node.input_shape_gen(None)
-        if N == 0:
-           N = randint(1,INT_MAX)
-        input_var_list = randint(1,INT_MAX,shape=(N,))
-        input_shapes = node.input_shape_gen(input_var_list)
-        output_shape = node.shape_infer(input_shapes)
-        ```
-
-        Args:
-            shape_var_list:
-
-        Returns:
-
-        """
-        raise NotImplementedError
-
-    def shape_forward(self) -> Dict[str, common.Shape]:
-        """Compute the shape of all node that required to compute this node.
-
-        Note:
-            All tensors that required to compute this node should have been set with a value that has a valid shape.
-
-        Returns:
-            A map of node-name to shape, all node that will be used to compute this node's shape will be included.
-
-        """
-        ret = {}
-        self.__shape_forward(ret)
-        return ret
-
-    def __shape_forward(self, ret: Dict[str, common.Shape]):
-        input_shapes = {}
-        for arg_name, i in self.inputs.items():
-            if i.node_name not in ret:
-                i.__shape_forward(ret)
-            input_shapes[arg_name] = ret[i.node_name]
-        shape = self.shape_infer(input_shapes)
-        ret[self.node_name] = shape
-
-    def shape_infer(self, input_shapes: Dict[str, common.Shape]) -> common.Shape:
-        raise NotImplementedError
-
     def _invalidate_user_value(self):
         new_users = []
-        for user in self.users:
+        for user in self._users:
             if user() is not None:
-                user().value = None  # update this node's value will invalid all user's value
+                user().value = None
                 user()._invalidate_user_value()
                 new_users.append(user)
-        self.users = new_users
+        self._users = new_users
 
     def backward(self, accumulate_grad: bool = False) -> None:
         """ Calculate the gradient of this node to all tensors that used to compute this node.
@@ -171,7 +121,7 @@ class Operation:
         all_grad_nodes = []
         self.__mark_all_grad_node(all_grad_nodes)
         to_clear_mark = all_grad_nodes.copy()
-        if not self.on_grad_path:
+        if not self._on_grad_path:
             _loger.warning(f"Backward ignored, for all tensors needed to calculate {self} do not require grad.")
             return
         self.__backward(accumulate_grad, True)
@@ -189,9 +139,9 @@ class Operation:
                     break
             N = len(all_grad_nodes)
         for node in to_clear_mark:
-            node.on_grad_path = False
+            node._on_grad_path = False
             if isinstance(node, tensor.Tensor):
-                node.prod_jacobian = {}
+                node.jacobian = {}
 
     def __mark_all_grad_node(self, ret: List["Operation"]):
         any_input_on_path = False
@@ -201,24 +151,24 @@ class Operation:
         for _, i in self.inputs.items():
             if i.__mark_all_grad_node(ret):
                 any_input_on_path = True
-        self.on_grad_path = any_input_on_path
+        self._on_grad_path = any_input_on_path
         if any_input_on_path and self not in ret:
             ret.append(self)
         return any_input_on_path
 
     def __backward(self, accumulate_grad: bool, at_root: bool = False) -> None:
         o_grad = None
-        for user_ref in self.users:
+        for user_ref in self._users:
             user = user_ref()
-            if user is not None and user.on_grad_path:
+            if user is not None and user._on_grad_path:
                 for user_input_k_name, user_input_k in user.inputs.items():
                     if user_input_k is self:
                         assert len(
-                            user.prod_jacobian) > 0, "Unknown error, jacobian should have been computed by now"
+                            user.jacobian) > 0, "Unknown error, jacobian should have been computed by now"
                         if o_grad is None:
-                            o_grad = user.prod_jacobian[user_input_k_name].copy()
+                            o_grad = user.jacobian[user_input_k_name].copy()
                         else:
-                            o_grad += user.prod_jacobian[user_input_k_name]
+                            o_grad += user.jacobian[user_input_k_name]
         if o_grad is None:
             assert at_root, "Unknown error, o_grad should have been computed by now"
             if self.value.size != 1:
@@ -234,7 +184,7 @@ class Operation:
             else:
                 self.grad += final_out
         else:
-            self.prod_jacobian = self._producted_jacobian(o_grad)
+            self.jacobian = self.__accumulate_jacobian(o_grad)
 
     def _compute(self) -> np.ndarray:
         raise NotImplementedError
@@ -252,7 +202,7 @@ class Operation:
         """
         raise NotImplementedError
 
-    def _producted_jacobian(self, o_prod: np.ndarray) -> Dict[str, np.ndarray]:
+    def __accumulate_jacobian(self, o_prod: np.ndarray) -> Dict[str, np.ndarray]:
         """ See `_jacobian` for more information. """
         jac = self._jacobian()
         assert set(jac.keys()).issubset(set(self.inputs.keys())), "Jacobian keys must be subset of input keys"
@@ -261,10 +211,10 @@ class Operation:
         return jac
 
     def __is_all_user_jacobian_computed(self) -> bool:
-        for userref in self.users:
+        for userref in self._users:
             user = userref()
-            if user is not None and user.on_grad_path:
-                if len(user.prod_jacobian) == 0:
+            if user is not None and user._on_grad_path:
+                if len(user.jacobian) == 0:
                     return False
         return True
 
