@@ -8,7 +8,6 @@ from typing import List, Union, Dict, ClassVar, TypeVar, Optional, Set
 
 import numpy as np
 
-
 OpArgT = Union[Number, np.ndarray, "Operation"]
 OperationClass = TypeVar("OperationClass", bound="Operation")
 OperationClassVar = ClassVar[OperationClass]
@@ -44,12 +43,12 @@ class Operation:
 
         # Try to compute the value of the node when init
         # and register this node to input's user
-        self._users: List[weakref.ReferenceType[Operation]] = []
+        self._users: Set[weakref.ReferenceType[Operation]] = set()
         is_all_input_known = True
         for _, inode in self.inputs.items():
             if inode.value is None:
                 is_all_input_known = False
-            inode._users.append(weakref.ref(self))
+            inode._users.add(weakref.ref(self))
         if is_all_input_known:
             self.value = self._compute()
 
@@ -92,21 +91,26 @@ class Operation:
                 "Chell will update grad like doing backward on `node.sum()`")
 
         # update jacobian_v for this node to break recursion
-        assert all_grad_nodes[-1] is self
+        assert self in all_grad_nodes
         done_grad_nodes = set()
-        self._jacobian_v = self.__accumulate_jacobian(np.ones(shape=(1, self.value.size)))
+        self.__accumulate_jacobian(np.ones(shape=(1, self.value.size)))
         done_grad_nodes.add(self)
 
         def is_node_on_grad_path(node: Operation) -> bool:
             return node in all_grad_nodes
 
+        def is_all_user_jacobian_computed(node) -> bool:
+            for userref in node._users:
+                user = userref()
+                if user is not None and is_node_on_grad_path(user) and user not in done_grad_nodes:
+                    return False
+            return True
+
         while True:
-            for i in range(len(all_grad_nodes) - 1, -1, -1):
-                node = all_grad_nodes[i]
-                if node not in done_grad_nodes and node.__is_all_user_jacobian_computed(is_node_on_grad_path):
+            for node in all_grad_nodes:
+                if node not in done_grad_nodes and is_all_user_jacobian_computed(node):
                     node.__backward(accumulate_grad, is_node_on_grad_path)
                     done_grad_nodes.add(node)
-                    break
             if len(done_grad_nodes) == len(all_grad_nodes):
                 break
 
@@ -131,7 +135,7 @@ class Operation:
             else:
                 self.grad += final_out
         else:
-            self._jacobian_v = self.__accumulate_jacobian(o_grad)
+            self.__accumulate_jacobian(o_grad)
 
     def _jacobian(self) -> Dict[str, np.ndarray]:
         """Compute the jacobian on every input.
@@ -143,19 +147,19 @@ class Operation:
         """
         raise NotImplementedError
 
-    def __find_all_grad_node(self) -> List["Operation"]:
+    def __find_all_grad_node(self) -> Set["Operation"]:
         """ Find all tensors that need to calculate gradient, and all nodes
         that has path from these tensors to this node.
         """
-        ret = []
+        ret = set()
         if isinstance(self, TensorOp) and self.requires_grad:
-            return [self]
+            return {self}
 
         for _, i in self.inputs.items():
             i_ret = i.__find_all_grad_node()
-            ret = i_ret + ret
+            ret = ret.union(i_ret)
         if len(ret) > 0 and self not in ret:  # A Node may appear in multiple paths, but only need to be calculated once
-            ret.append(self)
+            ret.add(self)
         return ret
 
     def __accumulate_jacobian(self, o_prod: np.ndarray) -> Dict[str, np.ndarray]:
@@ -164,15 +168,7 @@ class Operation:
         assert set(jac.keys()).issubset(set(self.inputs.keys())), "Jacobian keys must be subset of input keys"
         for input_i_name, input_i_jac in jac.items():
             jac[input_i_name] = np.matmul(o_prod, input_i_jac)
-        return jac
-
-    def __is_all_user_jacobian_computed(self, is_node_on_grad_path) -> bool:
-        for userref in self._users:
-            user = userref()
-            if user is not None and is_node_on_grad_path(user):
-                if len(user._jacobian_v) == 0:
-                    return False
-        return True
+        self._jacobian_v = jac
 
     ############################ Utils
 
@@ -188,12 +184,12 @@ class Operation:
 
     def invalidate_user_value(self):
         """ Invalidate the value of all users of this node recursively."""
-        new_users = []
+        new_users = set()
         for user in self._users:
             if user() is not None:
                 user().value = None
                 user().invalidate_user_value()
-                new_users.append(user)
+                new_users.add(user)
         self._users = new_users
 
     def dump(self):
